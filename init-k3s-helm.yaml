@@ -1,0 +1,125 @@
+---
+- name: Setup Helm
+  hosts: manager
+  become: yes
+  vars:
+    helm_version: "3.18.6"
+    k9s_version: "0.32.5"
+    
+  tasks:
+    - name: Update package cache (Ubuntu/Debian)
+      apt:
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Install required packages
+      package:
+        name:
+          - curl
+          - wget
+          - unzip
+        state: present
+
+    - name: Download Helm
+      get_url:
+        url: "https://get.helm.sh/helm-v{{ helm_version }}-linux-amd64.tar.gz"
+        dest: "/tmp/helm-v{{ helm_version }}-linux-amd64.tar.gz"
+        mode: '0644'
+        timeout: 60
+
+    - name: Extract Helm
+      unarchive:
+        src: "/tmp/helm-v{{ helm_version }}-linux-amd64.tar.gz"
+        dest: "/tmp"
+        remote_src: yes
+
+    - name: Move Helm binary to /usr/local/bin
+      copy:
+        src: "/tmp/linux-amd64/helm"
+        dest: "/usr/local/bin/helm"
+        mode: '0755'
+        remote_src: yes
+
+    - name: Verify Helm installation
+      command: helm version --short
+      register: helm_version_output
+      changed_when: false
+
+    - name: Display Helm version
+      debug:
+        msg: "{{ helm_version_output.stdout }}"
+
+# ---------------- K3s ----------------
+
+- name: Setup K3s
+  hosts: manager
+  become: yes
+
+  tasks:
+    - name: Install K3s on master nodes
+      shell: |
+        curl -sfL https://get.k3s.io | sh -
+      args:
+        creates: /usr/local/bin/k3s
+      when: inventory_hostname in groups['master']
+
+    - name: Create .kube directory
+      become_user: "{{ ansible_user }}"
+      file:
+        path: "/home/{{ ansible_user }}/.kube"
+        state: directory
+        mode: '0755'
+
+    - name: Copy K3s kubeconfig for user
+      shell: |
+        sudo k3s kubectl config view --raw > "/home/{{ ansible_user }}/.kube/config"
+        chmod 600 "/home/{{ ansible_user }}/.kube/config"
+        chown {{ ansible_user }}:{{ ansible_user }} "/home/{{ ansible_user }}/.kube/config"
+      become_user: root
+      when: inventory_hostname in groups['master']
+
+    - name: Set KUBECONFIG environment variable in bashrc
+      become_user: "{{ ansible_user }}"
+      lineinfile:
+        path: "/home/{{ ansible_user }}/.bashrc"
+        line: "export KUBECONFIG=/home/{{ ansible_user }}/.kube/config"
+
+    - name: Verify K3s installation
+      command: k3s kubectl get nodes
+      register: k3s_nodes
+      changed_when: false
+      when: inventory_hostname in groups['master']
+
+    - name: Clean up temporary files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "/tmp/helm-v{{ helm_version }}-linux-amd64.tar.gz"
+        - "/tmp/linux-amd64"
+      delegate_to: "{{ groups['master'][0] }}"
+      run_once: true
+
+# ---------------- K9s ----------------
+
+- name: Setup K9s
+  hosts: manager
+  become: yes
+
+  tasks:
+    - name: Download the K9s Debian Package
+      get_url:
+        url: "https://github.com/derailed/k9s/releases/download/v{{ k9s_version }}/k9s_linux_amd64.deb"
+        dest: "/tmp/k9s_{{ k9s_version }}_linux_amd64.deb"
+        timeout: 60
+      when: inventory_hostname in groups['master']
+
+    - name: Install K9s
+      apt:
+        deb: "/tmp/k9s_{{ k9s_version }}_linux_amd64.deb"
+
+    - name: Clean up temporary files
+      file:
+        path: "/tmp/k9s_{{ k9s_version }}_linux_amd64.deb"
+        state: absent
+      when: inventory_hostname in groups['master']

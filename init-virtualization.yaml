@@ -1,0 +1,124 @@
+---
+- name: Setup Docker Engine
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Ensure required packages are installed
+      apt:
+        name:
+          - curl
+          - ca-certificates
+          - gnupg
+        state: present
+        update_cache: yes
+
+    - name: Remove conflicting packages
+      apt:
+        name:
+          - docker
+          - docker-engine
+          - docker.io
+          - docker-doc
+          - docker-compose
+          - docker-compose-v2
+          - podman-docker
+          - containerd
+          - runc
+        state: absent
+
+    - name: Create keyrings directory
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Download Docker GPG key
+      get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: '0644'
+
+    - name: Get DEB architecture
+      shell: dpkg --print-architecture
+      register: deb_architecture
+      changed_when: false
+
+    - name: Add Docker repository
+      ansible.builtin.apt_repository:
+        repo: "deb [arch={{ deb_architecture.stdout }} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu {{ ansible_lsb.codename }} stable"
+        filename: docker
+        state: present
+
+    - name: Install Docker Engine
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+        update_cache: yes
+
+    - name: Ensure Docker is started and enabled
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Add user to docker group
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+
+# ---------------- VirtualBox ----------------
+
+- name: Setup VirtualBox
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Ensure required packages are installed
+      apt:
+        name:
+          - build-essential
+          - dkms
+          - linux-headers-{{ ansible_kernel }}
+        state: present
+        update_cache: yes
+
+    - name: download .deb file
+      get_url:
+        url: https://download.virtualbox.org/virtualbox/7.2.2/virtualbox-7.2_7.2.2-170484~Ubuntu~{{ ansible_lsb.codename }}_amd64.deb
+        dest: /tmp/virtualbox-7.2_7.2.2-170484~Ubuntu~{{ ansible_lsb.codename }}_amd64.deb
+        when: ansible_lsb.codename != "noble" # until virtualbox 7.2.2 supports noble
+
+    - name: install virtualbox
+      apt:
+        deb: /tmp/virtualbox-7.2_7.2.2-170484~Ubuntu~{{ ansible_lsb.codename }}_amd64.deb
+        state: present
+
+    - name: Ensure vboxdrv is started
+      service:
+        name: vboxdrv
+        state: started
+        enabled: yes
+
+# ---------------- Multipass ----------------
+
+- name: Setup Multipass
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Ensure snapd is installed
+      apt:
+        name: snapd
+        state: present
+
+    - name: Install multipass via snap
+      community.general.snap:
+        name: multipass
+        state: present

@@ -1,0 +1,74 @@
+---
+- name: Setup Terraform
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Ensure required packages are installed
+      apt:
+        name:
+          - gnupg
+          - software-properties-common
+        state: present
+        update_cache: yes
+
+    - name: Download Hashicorp GPG key
+      get_url:
+        url: https://apt.releases.hashicorp.com/gpg
+        dest: /tmp/hashicorp.gpg
+
+    - name: Dearmor and install Hashicorp GPG key
+      shell: |
+        gpg --dearmor < /tmp/hashicorp.gpg > /usr/share/keyrings/hashicorp-archive-keyring.gpg
+      args:
+        creates: /usr/share/keyrings/hashicorp-archive-keyring.gpg
+
+    - name: Get DEB architecture
+      shell: dpkg --print-architecture
+      register: deb_architecture
+      changed_when: false
+
+    - name: Add Hashicorp repository
+      apt_repository:
+        repo: "deb [arch={{ deb_architecture.stdout }} signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com {{ ansible_lsb.codename }} main"
+        state: present
+        filename: hashicorp
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install Terraform
+      apt:
+        name: terraform
+        state: present
+
+# ---------------- AWS ----------------
+
+- name: Setup AWS CLI
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Ensure required packages are installed
+      apt:
+        name:
+          - unzip
+        state: present
+        update_cache: yes
+
+    - name: Download AWS CLI installer
+      get_url:
+        url: https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
+        dest: /tmp/awscliv2.zip
+        timeout: 60
+
+    - name: Unzip AWS CLI installer
+      unarchive:
+        src: /tmp/awscliv2.zip
+        dest: /tmp
+        remote_src: yes
+
+    - name: Install AWS CLI
+      shell:
+        cmd: /tmp/aws/install
