@@ -61,25 +61,25 @@
       when: inventory_hostname in groups['master']
 
     - name: Create .kube directory
-      become_user: "{{ ansible_user }}"
+      become_user: "{{ ansible_user_id }}"
       file:
-        path: "/home/{{ ansible_user }}/.kube"
+        path: "/home/{{ ansible_user_id }}/.kube"
         state: directory
         mode: '0755'
 
     - name: Copy K3s kubeconfig for user
       shell: |
-        sudo k3s kubectl config view --raw > "/home/{{ ansible_user }}/.kube/config"
-        chmod 600 "/home/{{ ansible_user }}/.kube/config"
-        chown {{ ansible_user }}:{{ ansible_user }} "/home/{{ ansible_user }}/.kube/config"
+        sudo k3s kubectl config view --raw > "/home/{{ ansible_user_id }}/.kube/config"
+        chmod 600 "/home/{{ ansible_user_id }}/.kube/config"
+        chown {{ ansible_user_id }}:{{ ansible_user_id }} "/home/{{ ansible_user_id }}/.kube/config"
       become_user: root
       when: inventory_hostname in groups['master']
 
     - name: Set KUBECONFIG environment variable in bashrc
-      become_user: "{{ ansible_user }}"
+      become_user: "{{ ansible_user_id }}"
       lineinfile:
-        path: "/home/{{ ansible_user }}/.bashrc"
-        line: "export KUBECONFIG=/home/{{ ansible_user }}/.kube/config"
+        path: "/home/{{ ansible_user_id }}/.bashrc"
+        line: "export KUBECONFIG=/home/{{ ansible_user_id }}/.kube/config"
 
     - name: Verify K3s installation
       command: k3s kubectl get nodes
