@@ -93,7 +93,7 @@
       get_url:
         url: https://download.virtualbox.org/virtualbox/7.2.2/virtualbox-7.2_7.2.2-170484~Ubuntu~{{ ansible_lsb.codename }}_amd64.deb
         dest: /tmp/virtualbox-7.2_7.2.2-170484~Ubuntu~{{ ansible_lsb.codename }}_amd64.deb
-        when: ansible_lsb.codename != "noble" # until virtualbox 7.2.2 supports noble
+      when: ansible_lsb.codename != "noble" # until virtualbox 7.2.2 supports noble
 
     - name: install virtualbox
       apt:
