@@ -4,6 +4,15 @@
   become: yes
 
   tasks:
+    - name: Get user with uid 1000
+      command: getent passwd 1000
+      register: uid1000
+      changed_when: false
+
+    - name: Set ansible_user variable
+      set_fact:
+        ansible_user: "{{ uid1000.stdout.split(':')[0] }}"
+
     - name: Ensure required packages are installed
       apt:
         name:
@@ -69,7 +78,7 @@
 
     - name: Add user to docker group
       user:
-        name: "{{ ansible_user_id }}"
+        name: "{{ ansible_user }}"
         groups: docker
         append: yes
 
