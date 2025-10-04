@@ -1,0 +1,163 @@
+---
+- name: Generate Wazuh Agent Certificates
+  hosts: agents
+  become: yes
+  vars:
+    output_folder: "/var/ossec/etc"
+    root_ca_folder: "{{ ROOT_CA_FOLDER | default('/opt/root-ca') }}"
+    country: "DE"
+    location: "Bayern"
+    organization: "Adorsys"
+    key_bits: 4096
+    cert_days: 3650
+    
+  pre_tasks:
+    - name: Check if ROOT_CA_FOLDER is defined
+      fail:
+        msg: "Please set ROOT_CA_FOLDER environment variable or define it in vars"
+      when: root_ca_folder is not defined or root_ca_folder == ""
+
+    - name: Verify root CA files exist
+      stat:
+        path: "{{ root_ca_folder }}/{{ item }}"
+      register: ca_files
+      loop:
+        - "root-ca.pem"
+        - "root-ca-key.pem"
+      delegate_to: "{{ groups['master'][0] }}"
+
+    - name: Fail if root CA files are missing
+      fail:
+        msg: "Root CA file {{ item.item }} not found in {{ root_ca_folder }}"
+      when: not item.stat.exists
+      loop: "{{ ca_files.results }}"
+
+  tasks:
+    - name: Install OpenSSL
+      package:
+        name: openssl
+        state: present
+
+    - name: Create output directory
+      file:
+        path: "{{ output_folder }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create wazuh group (if not exists)
+      group:
+        name: wazuh
+        state: present
+
+    - name: Generate private key for agent
+      openssl_privatekey:
+        path: "{{ output_folder }}/sslagent.key"
+        size: "{{ key_bits }}"
+        mode: '0640'
+        owner: root
+        group: wazuh
+
+    - name: Generate certificate signing request (CSR)
+      openssl_csr:
+        path: "{{ output_folder }}/sslagent.csr"
+        privatekey_path: "{{ output_folder }}/sslagent.key"
+        country_name: "{{ country }}"
+        locality_name: "{{ location }}"
+        organization_name: "{{ organization }}"
+        common_name: "{{ inventory_hostname }}"
+        extended_key_usage:
+          - clientAuth
+        subject_alt_name:
+          - "DNS:{{ inventory_hostname }}"
+        mode: '0640'
+        owner: root
+        group: wazuh
+
+    - name: Copy root CA files to agent
+      copy:
+        src: "{{ root_ca_folder }}/{{ item }}"
+        dest: "/tmp/{{ item }}"
+        mode: '0600'
+      loop:
+        - "root-ca.pem"
+        - "root-ca-key.pem"
+      delegate_to: "{{ groups['master'][0] }}"
+
+    - name: Fetch root CA files from master
+      fetch:
+        src: "{{ root_ca_folder }}/{{ item }}"
+        dest: "/tmp/{{ item }}"
+        flat: yes
+      loop:
+        - "root-ca.pem"
+        - "root-ca-key.pem"
+      delegate_to: "{{ groups['master'][0] }}"
+      run_once: true
+
+    - name: Copy root CA files to agent
+      copy:
+        src: "/tmp/{{ item }}"
+        dest: "/tmp/{{ item }}"
+        mode: '0600'
+      loop:
+        - "root-ca.pem"
+        - "root-ca-key.pem"
+
+    - name: Sign CSR with root CA
+      openssl_certificate:
+        path: "{{ output_folder }}/sslagent.cert"
+        csr_path: "{{ output_folder }}/sslagent.csr"
+        ownca_path: "/tmp/root-ca.pem"
+        ownca_privatekey_path: "/tmp/root-ca-key.pem"
+        provider: ownca
+        ownca_digest: sha256
+        ownca_not_after: "+{{ cert_days }}d"
+        mode: '0640'
+        owner: root
+        group: wazuh
+
+    - name: Clean up temporary root CA files
+      file:
+        path: "/tmp/{{ item }}"
+        state: absent
+      loop:
+        - "root-ca.pem"
+        - "root-ca-key.pem"
+
+    - name: Clean up local temporary files
+      file:
+        path: "/tmp/{{ item }}"
+        state: absent
+      loop:
+        - "root-ca.pem"
+        - "root-ca-key.pem"
+      delegate_to: localhost
+      run_once: true
+
+    - name: Display certificate information
+      debug:
+        msg:
+          - "✅ Certificate and key created in {{ output_folder }}"
+          - "   - sslagent.key"
+          - "   - sslagent.cert"
+          - "   - sslagent.csr (safe to delete after enrollment)"
+
+    - name: Verify certificate
+      openssl_certificate_info:
+        path: "{{ output_folder }}/sslagent.cert"
+      register: cert_info
+
+    - name: Show certificate details
+      debug:
+        msg:
+          - "Subject: {{ cert_info.subject }}"
+          - "Issuer: {{ cert_info.issuer }}"
+          - "Serial Number: {{ cert_info.serial_number }}"
+          - "Not Valid After: {{ cert_info.not_after }}"
+          - "Extended Key Usage: {{ cert_info.extended_key_usage }}"
+
+    - name: Optional - Remove CSR file
+      file:
+        path: "{{ output_folder }}/sslagent.csr"
+        state: absent
+      when: remove_csr | default(false) | bool
